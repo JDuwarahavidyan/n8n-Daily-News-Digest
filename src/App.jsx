@@ -3,7 +3,7 @@ import ReCAPTCHA from 'react-google-recaptcha'
 import './App.css'
 
 const RECAPTCHA_SITE_KEY = '6LdXZXIsAAAAAGYUFHMUR0Bsm2ApQ7g5OBSqvoZS'
-const WEBHOOK_URL = 'https://duwarahavidyan.app.n8n.cloud/webhook-test/subscribe'
+const WEBHOOK_URL = 'https://duwarahavidyan.app.n8n.cloud/webhook/subscribe'
 
 function App() {
   const [name, setName] = useState('')
