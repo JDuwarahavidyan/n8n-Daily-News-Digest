@@ -1,0 +1,683 @@
+{
+  "name": "AI Latest News",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 10
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        -352,
+        -96
+      ],
+      "id": "afa561aa-a2b1-4366-afe1-99630dcf1dc0",
+      "name": "Schedule Trigger",
+      "executeOnce": false,
+      "retryOnFail": false
+    },
+    {
+      "parameters": {
+        "url": "https://newsapi.org/v2/everything",
+        "sendQuery": true,
+        "specifyQuery": "json",
+        "jsonQuery": "{\n  \"q\": \"artificial intelligence OR machine learning OR deep learning OR AI OR ML\",\n  \"language\": \"en\",\n  \"sortBy\": \"publishedAt\",\n  \"pageSize\": 5,\n  \"apiKey\": \"ed5566ae196f4497a8bcadb3d3e450aa\"\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -128,
+        -240
+      ],
+      "id": "733f194f-5f31-4985-8587-67283844ff64",
+      "name": "Fetch AI News"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Get raw XML from HTTP Request node\nconst inputItems = $input.all();\nif (!inputItems.length) {\n  throw new Error(\"No input items found. Make sure the HTTP Request node is connected and executed.\");\n}\n\nconst xml = inputItems[0].json.data;\n\n// Minimal XML parsing using regex (safe for arXiv feed structure)\nfunction getAll(tag, text) {\n  const regex = new RegExp(`<${tag}[^>]*>([\\\\s\\\\S]*?)<\\\\/${tag}>`, 'g');\n  const results = [];\n  let match;\n  while ((match = regex.exec(text)) !== null) {\n    results.push(match[1]);\n  }\n  return results;\n}\n\nfunction getOne(tag, text) {\n  const match = new RegExp(`<${tag}[^>]*>([\\\\s\\\\S]*?)<\\\\/${tag}>`).exec(text);\n  return match ? match[1] : null;\n}\n\nconst entriesXml = getAll('entry', xml);\n\nreturn entriesXml.map((entryXml) => {\n  const title = getOne('title', entryXml)?.replace(/\\s+/g, ' ').trim();\n  const summary = getOne('summary', entryXml)?.replace(/\\s+/g, ' ').trim();\n  const id = getOne('id', entryXml);\n\n  // Extract PDF link\n  const pdfMatch = /<link[^>]*type=\"application\\/pdf\"[^>]*href=\"([^\"]+)\"/.exec(entryXml);\n  const pdf = pdfMatch ? pdfMatch[1] : (id ? `https://arxiv.org/pdf/${id.split('/abs/')[1]}.pdf` : null);\n\n  // Authors\n  const authorMatches = getAll('name', entryXml);\n  const authors = authorMatches.join(', ');\n\n  // Categories\n  const categoryMatches = [];\n  const catRegex = /<category[^>]*term=\"([^\"]+)\"/g;\n  let cm;\n  while ((cm = catRegex.exec(entryXml)) !== null) {\n    categoryMatches.push(cm[1]);\n  }\n  const categories = categoryMatches.join(', ');\n\n  // Published date\n  const published = getOne('published', entryXml);\n\n  return {\n    json: {\n      title,\n      summary,\n      url: id,\n      pdf,\n      authors,\n      categories,\n      published,\n      source: \"arXiv\"\n    }\n  };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        96,
+        96
+      ],
+      "id": "aacdc847-fc64-4460-aaee-441801bbf893",
+      "name": "Covert to Valid JSON"
+    },
+    {
+      "parameters": {
+        "url": "https://api.semanticscholar.org/graph/v1/paper/search",
+        "sendQuery": true,
+        "specifyQuery": "json",
+        "jsonQuery": "{\n  \"query\": \"machine learning OR deep learning OR neural network OR large language model\",\n  \"limit\": 10,\n  \"fields\": \"title,abstract,url,authors,year,venue\",\n  \"sort\": \"publicationDate:desc\"\n}",
+        "sendHeaders": true,
+        "specifyHeaders": "json",
+        "jsonHeaders": "{\n  \"x-api-key\": \"qu4boUxDth9jD1esRzlme8k13wYFIksx35QnTJO0\",\n  \"User-Agent\": \"n8n-ai-digest/1.0\"\n}",
+        "options": {
+          "batching": {
+            "batch": {
+              "batchSize": 5
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        96,
+        -96
+      ],
+      "id": "05f6dd01-022e-43b7-adb5-ea0b7221de82",
+      "name": "Fetch from Semantic Scholar"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        320,
+        0
+      ],
+      "id": "ff2ee9c4-0491-4791-9290-de1cbcfd6b7b",
+      "name": "Merge"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Summarize the following abstract into exactly ONE concise sentence:\n\nTitle: {{$json.title}}\nAbstract: {{$json.summary}}\n\nReturn JSON in the following format:\n{\n  \"title\": \"string\",\n  \"short_summary\": \"string\",\n  \"url\": \"string\",\n  \"pdf\": \"string\",\n  \"authors\": \"string\",\n  \"published\": \"string\",\n  \"source\": \"string\"\n}\n\nRules:\n- short_summary must be exactly TWO sentences.\n- Do not include markdown.\n\nInput:\nTitle: {{$json.title}}\nAbstract: {{$json.summary}}\nURL: {{$json.url}}\nPDF: {{$json.pdf}}\nAuthors: {{$json.authors}}\nPublished: {{$json.published}}\nSource: {{$json.source}}",
+        "hasOutputParser": true,
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        768,
+        0
+      ],
+      "id": "eeb08fe2-2fea-4026-9eda-c715b2f9f249",
+      "name": "AI Agent"
+    },
+    {
+      "parameters": {
+        "jsonSchemaExample": "{\n  \"title\": \"string\",\n  \"short_summary\": \"string\",\n  \"url\": \"string\",\n  \"pdf\": \"string\",\n  \"authors\": \"string\",\n  \"published\": \"string\",\n  \"source\": \"string\"\n}\n"
+      },
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        1024,
+        224
+      ],
+      "id": "1ab99e16-d30d-447f-a6b2-c296ccdac766",
+      "name": "Structured Output Parser"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "mode": "list",
+          "value": "gpt-5-mini"
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.3,
+      "position": [
+        640,
+        224
+      ],
+      "id": "ebb9c0a0-7782-4723-9ba4-9b0902a09686",
+      "name": "Summarize the Abstract",
+      "credentials": {
+        "openAiApi": {
+          "id": "5gfsl6feHp1Z2I8b",
+          "name": "n8n free OpenAI API credits"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        1136,
+        -224
+      ],
+      "id": "e8664536-239a-4741-a7c0-5da98e7e21fb",
+      "name": "Merge Both Results"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Get all merged items from both sources\nconst inputItems = $input.all();\n\n// Normalize fields so both sources match\nconst normalized = inputItems.map(item => {\n  const j = item.json;\n\n  return {\n    json: {\n      title: j.title || j.paperTitle || \"Untitled\",\n      summary: j.summary || j.abstract || \"\",\n      url: j.url || j.paperUrl || \"\",\n      pdf: j.pdf || j.openAccessPdf?.url || null,\n      authors: Array.isArray(j.authors)\n        ? j.authors.map(a => a.name || a).join(\", \")\n        : j.authors || \"Unknown\",\n      categories: j.categories || j.venue || \"N/A\",\n      published: j.published || j.publicationDate || j.year || null,\n      source: j.source || (j.paperId ? \"Semantic Scholar\" : \"Unknown\")\n    }\n  };\n});\n\n// Helper: parse published date safely\nfunction toDate(value) {\n  if (!value) return new Date(0);\n  const d = new Date(value);\n  if (!isNaN(d)) return d;\n  if (typeof value === \"number\") return new Date(`${value}-01-01`);\n  return new Date(0);\n}\n\n// Helper: format date to YYYY-MM-DD\nfunction formatDate(value) {\n  const d = toDate(value);\n  if (isNaN(d.getTime())) return null;\n  return d.toISOString().slice(0, 10); // YYYY-MM-DD\n}\n\n// 🔁 Deduplicate by normalized title\nconst seen = new Set();\nconst deduped = [];\n\nfor (const item of normalized) {\n  const key = (item.json.title || \"\")\n    .toLowerCase()\n    .replace(/\\s+/g, \" \")\n    .trim();\n\n  if (!seen.has(key)) {\n    seen.add(key);\n    deduped.push(item);\n  }\n}\n\n// 📅 Sort by published date (latest first)\ndeduped.sort((a, b) => {\n  const da = toDate(a.json.published).getTime();\n  const db = toDate(b.json.published).getTime();\n  return db - da;\n});\n\n// ✂️ Take ONLY top 5 latest across BOTH sources\nconst top5 = deduped.slice(0, 5);\n\n// 🧼 Format final published date\nreturn top5.map(item => {\n  return {\n    json: {\n      ...item.json,\n      published: formatDate(item.json.published)\n    }\n  };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        544,
+        0
+      ],
+      "id": "170ca55d-5096-43e4-bb22-2ee7a1433a85",
+      "name": "JSON Output"
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\n\nconst newsItem = items.find(item => item.json?.articles);\nconst paperItems = items.filter(item => item.json?.output);\n\nconst articles = newsItem?.json?.articles || [];\nconst papers = paperItems.map(item => item.json.output).filter(Boolean);\n\nconst today = new Date().toLocaleDateString('en-US', {\n  weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'\n});\n\nconst subject = `🧠 Your Intelligence Brief — ${today}`;\n\nconst newsAccents = ['#ff6b35', '#ffdd57', '#ff6b35', '#ffdd57'];\n\nconst newsCompact = articles.slice(1, 5).map((article, i) => `\n  <tr><td class=\"compact-td\" style=\"background-color:#161616;border-radius:12px;padding:18px 22px;border-left:3px solid ${newsAccents[i]};\">\n    <table width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" border=\"0\">\n      <tr><td><span style=\"font-size:9px;font-weight:700;color:${newsAccents[i]};letter-spacing:2px;font-family:'DM Sans',Arial,sans-serif;\">#${i+2}</span>&nbsp;&nbsp;<span style=\"font-size:9px;color:#555555;font-family:'DM Sans',Arial,sans-serif;\">${article.source?.name || ''}</span></td></tr>\n      <tr><td style=\"padding-top:7px;\"><a href=\"${article.url}\" class=\"compact-title\" style=\"font-size:14px;font-weight:600;color:#f0f0f0;text-decoration:none;line-height:1.4;display:block;font-family:'DM Sans',Arial,sans-serif;\">${article.title}</a></td></tr>\n      <tr><td style=\"padding-top:7px;\"><p style=\"margin:0;font-size:12px;color:#777777;line-height:1.6;font-family:'DM Sans',Arial,sans-serif;\">${article.description?.slice(0, 160) || ''}...</p></td></tr>\n      <tr><td style=\"padding-top:8px;\"><a href=\"${article.url}\" style=\"font-size:11px;color:${newsAccents[i]};text-decoration:none;font-weight:600;font-family:'DM Sans',Arial,sans-serif;\">Read full article →</a></td></tr>\n    </table>\n  </td></tr>\n  <tr><td style=\"height:8px;background-color:#0d0d0d;\"></td></tr>\n`).join('');\n\nconst paperAccents = ['#00c9a7', '#0077ff', '#00c9a7', '#0077ff'];\nconst paperTextColors = ['#e0fff8', '#e8f0ff', '#e0fff8', '#e8f0ff'];\nconst paperDescColors = ['#557a70', '#445577', '#557a70', '#445577'];\nconst paperAuthorColors = ['#335550', '#334466', '#335550', '#334466'];\n\nconst papersCompact = papers.slice(1, 5).map((paper, i) => `\n  <tr><td class=\"compact-td\" style=\"background-color:#111111;border-radius:12px;padding:18px 22px;border-left:3px solid ${paperAccents[i]};\">\n    <table width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" border=\"0\">\n      <tr><td><span style=\"font-size:9px;font-weight:700;color:${paperAccents[i]};letter-spacing:2px;font-family:'DM Sans',Arial,sans-serif;\">#${i+2}</span>&nbsp;&nbsp;<span style=\"font-size:9px;color:#444444;font-family:'DM Sans',Arial,sans-serif;\">${paper.published} · ${paper.source}</span></td></tr>\n      <tr><td style=\"padding-top:7px;\"><a href=\"${paper.url}\" class=\"compact-title\" style=\"font-size:14px;font-weight:600;color:${paperTextColors[i]};text-decoration:none;line-height:1.4;display:block;font-family:'DM Sans',Arial,sans-serif;\">${paper.title}</a></td></tr>\n      <tr><td style=\"padding-top:7px;\"><p style=\"margin:0;font-size:12px;color:${paperDescColors[i]};line-height:1.6;font-family:'DM Sans',Arial,sans-serif;\">${paper.short_summary?.slice(0, 180) || ''}...</p></td></tr>\n      <tr><td style=\"padding-top:8px;\"><span style=\"font-size:11px;color:${paperAuthorColors[i]};font-family:'DM Sans',Arial,sans-serif;\">✍️ ${paper.authors?.split(',').slice(0,2).join(', ')}${paper.authors?.split(',').length > 2 ? ' et al.' : ''}</span>&nbsp;&nbsp;<a href=\"${paper.pdf}\" style=\"font-size:11px;color:${paperAccents[i]};text-decoration:none;font-weight:600;font-family:'DM Sans',Arial,sans-serif;\">Read Paper →</a></td></tr>\n    </table>\n  </td></tr>\n  <tr><td style=\"height:8px;background-color:#0d0d0d;\"></td></tr>\n`).join('');\n\nconst featuredNews = articles[0];\nconst featuredPaper = papers[0];\n\nconst emailBody = `<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n  <meta charset=\"UTF-8\">\n  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n  <meta name=\"color-scheme\" content=\"dark\">\n  <meta name=\"supported-color-schemes\" content=\"dark\">\n  <link href=\"https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;900&family=DM+Sans:wght@400;500;600&display=swap\" rel=\"stylesheet\">\n  <style>\n    :root { color-scheme: dark; }\n    body { margin:0 !important; padding:0 !important; background-color:#0d0d0d !important; -webkit-text-size-adjust:100%; }\n    .email-wrapper { background-color:#0d0d0d !important; }\n    .ExternalClass { width:100%; }\n    .ExternalClass, .ExternalClass p, .ExternalClass span, .ExternalClass td { line-height:100%; }\n    @media only screen and (max-width:640px) {\n      .main-table { width:100% !important; }\n      .hero-td { padding:30px 20px 26px 20px !important; }\n      .hero-h1 { font-size:28px !important; letter-spacing:0 !important; }\n      .hero-emoji { display:none !important; }\n      .section-label { font-size:18px !important; }\n      .featured-td { padding:18px 16px !important; }\n      .featured-title { font-size:16px !important; }\n      .compact-td { padding:15px 16px !important; }\n      .compact-title { font-size:13px !important; }\n      .footer-td { padding:20px 18px !important; }\n    }\n  </style>\n</head>\n<body style=\"margin:0;padding:0;background-color:#0d0d0d;\">\n<div class=\"email-wrapper\" style=\"background-color:#0d0d0d;padding:30px 0;font-family:'DM Sans',Arial,sans-serif;\">\n<table width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" border=\"0\" style=\"background-color:#0d0d0d;\">\n<tr><td align=\"center\" style=\"padding:0 10px;\">\n<table class=\"main-table\" width=\"620\" cellpadding=\"0\" cellspacing=\"0\" border=\"0\" style=\"max-width:620px;width:100%;\">\n\n  <!-- DATE -->\n  <tr>\n    <td style=\"padding-bottom:14px;text-align:center;background-color:#0d0d0d;\">\n      <span style=\"font-size:10px;color:#ffffff;letter-spacing:4px;text-transform:uppercase;font-family:'DM Sans',Arial,sans-serif;\">${today}</span>\n    </td>\n  </tr>\n\n  <!-- HERO -->\n  <tr>\n    <td class=\"hero-td\" style=\"background:linear-gradient(145deg,#ff6b35 0%,#f7a45a 45%,#ffdd57 100%);border-radius:18px;padding:44px 44px 36px 44px;\">\n      <table width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" border=\"0\">\n        <tr>\n          <td style=\"vertical-align:top;\">\n            <p style=\"margin:0 0 8px 0;font-size:10px;font-weight:600;color:rgba(0,0,0,0.42);letter-spacing:3px;text-transform:uppercase;font-family:'DM Sans',Arial,sans-serif;\">Daily Intelligence Brief</p>\n            <h1 class=\"hero-h1\" style=\"margin:0;font-family:'Playfair Display',Georgia,serif;font-size:38px;font-weight:900;color:#1a0800;line-height:1.15;letter-spacing:-0.5px;\">Your Morning<br>Intelligence Feed</h1>\n            <p style=\"margin:14px 0 0 0;font-size:13px;color:rgba(0,0,0,0.5);font-weight:500;font-family:'DM Sans',Arial,sans-serif;\">5 headlines + 5 research papers that matter today</p>\n          </td>\n          <td class=\"hero-emoji\" width=\"70\" style=\"text-align:right;vertical-align:top;padding-left:12px;\">\n            <span style=\"font-size:50px;line-height:1;\">🧠</span>\n          </td>\n        </tr>\n      </table>\n    </td>\n  </tr>\n\n  <tr><td style=\"height:26px;background-color:#0d0d0d;\"></td></tr>\n\n  <!-- NEWS HEADER -->\n  <tr>\n    <td style=\"border-top:2px solid #ff6b35;padding-top:12px;padding-bottom:12px;background-color:#0d0d0d;\">\n      <table cellpadding=\"0\" cellspacing=\"0\" border=\"0\">\n        <tr>\n          <td><span style=\"font-size:9px;font-weight:600;color:#ff6b35;letter-spacing:4px;text-transform:uppercase;font-family:'DM Sans',Arial,sans-serif;\">Section 01</span></td>\n          <td style=\"padding-left:12px;\"><span class=\"section-label\" style=\"font-family:'Playfair Display',Georgia,serif;font-size:20px;font-weight:700;color:#ffffff;\">Top News Stories 📰</span></td>\n        </tr>\n      </table>\n    </td>\n  </tr>\n\n  <!-- FEATURED NEWS -->\n  ${featuredNews ? `\n  <tr>\n    <td class=\"featured-td\" style=\"background-color:#1c1c1c;border-radius:14px;padding:24px;border:1px solid #2a2a2a;\">\n      <table width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" border=\"0\">\n        <tr><td style=\"padding-bottom:12px;\"><span style=\"background-color:#ff6b35;color:#ffffff;font-size:9px;font-weight:700;padding:4px 12px;border-radius:20px;letter-spacing:1px;text-transform:uppercase;font-family:'DM Sans',Arial,sans-serif;\">#1 · Top Story</span></td></tr>\n        <tr><td><a href=\"${featuredNews.url}\" class=\"featured-title\" style=\"font-family:'Playfair Display',Georgia,serif;font-size:19px;font-weight:700;color:#ffffff;text-decoration:none;line-height:1.35;display:block;\">${featuredNews.title}</a></td></tr>\n        <tr><td style=\"padding-top:10px;\"><p style=\"margin:0;font-size:13px;color:#a0a0a0;line-height:1.7;font-family:'DM Sans',Arial,sans-serif;\">${featuredNews.description?.slice(0, 200) || ''}...</p></td></tr>\n        <tr><td style=\"padding-top:14px;\">\n          <table cellpadding=\"0\" cellspacing=\"0\" border=\"0\"><tr>\n            <td style=\"background-color:#262626;border-radius:6px;padding:4px 10px;\"><span style=\"font-size:11px;color:#888888;font-family:'DM Sans',Arial,sans-serif;\">📰 ${featuredNews.source?.name || ''}</span></td>\n            <td style=\"padding-left:14px;\"><a href=\"${featuredNews.url}\" style=\"font-size:12px;color:#ff6b35;text-decoration:none;font-weight:700;font-family:'DM Sans',Arial,sans-serif;\">Read full article →</a></td>\n          </tr></table>\n        </td></tr>\n      </table>\n    </td>\n  </tr>\n  <tr><td style=\"height:8px;background-color:#0d0d0d;\"></td></tr>\n  ` : ''}\n\n  <!-- NEWS 2-5 -->\n  ${newsCompact}\n\n  <tr><td style=\"height:28px;background-color:#0d0d0d;\"></td></tr>\n\n  <!-- DIVIDER -->\n  <tr><td style=\"height:2px;background:linear-gradient(90deg,#00c9a7,#0077ff);border-radius:2px;\"></td></tr>\n\n  <tr><td style=\"height:26px;background-color:#0d0d0d;\"></td></tr>\n\n  <!-- PAPERS HEADER -->\n  <tr>\n    <td style=\"border-top:2px solid #00c9a7;padding-top:12px;padding-bottom:12px;background-color:#0d0d0d;\">\n      <table cellpadding=\"0\" cellspacing=\"0\" border=\"0\">\n        <tr>\n          <td><span style=\"font-size:9px;font-weight:600;color:#00c9a7;letter-spacing:4px;text-transform:uppercase;font-family:'DM Sans',Arial,sans-serif;\">Section 02</span></td>\n          <td style=\"padding-left:12px;\"><span class=\"section-label\" style=\"font-family:'Playfair Display',Georgia,serif;font-size:20px;font-weight:700;color:#ffffff;\">Research Papers 🔬</span></td>\n        </tr>\n      </table>\n    </td>\n  </tr>\n\n  <!-- FEATURED PAPER -->\n  ${featuredPaper ? `\n  <tr>\n    <td class=\"featured-td\" style=\"background-color:#0d1f1b;border-radius:14px;padding:24px;border:1px solid #00c9a7;\">\n      <table width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" border=\"0\">\n        <tr><td style=\"padding-bottom:12px;\">\n          <table cellpadding=\"0\" cellspacing=\"0\" border=\"0\"><tr>\n            <td><span style=\"background-color:#00c9a7;color:#000000;font-size:9px;font-weight:700;padding:4px 12px;border-radius:20px;letter-spacing:1px;text-transform:uppercase;font-family:'DM Sans',Arial,sans-serif;\">#1 · Top Paper</span></td>\n            <td style=\"padding-left:10px;\"><span style=\"font-size:10px;color:#00c9a7;font-weight:600;font-family:'DM Sans',Arial,sans-serif;\">📅 ${featuredPaper.published} · ${featuredPaper.source}</span></td>\n          </tr></table>\n        </td></tr>\n        <tr><td><a href=\"${featuredPaper.url}\" class=\"featured-title\" style=\"font-family:'Playfair Display',Georgia,serif;font-size:18px;font-weight:700;color:#e0fff8;text-decoration:none;line-height:1.35;display:block;\">${featuredPaper.title}</a></td></tr>\n        <tr><td style=\"padding-top:10px;\"><p style=\"margin:0;font-size:13px;color:#7abfb3;line-height:1.7;font-family:'DM Sans',Arial,sans-serif;\">${featuredPaper.short_summary?.slice(0, 220) || ''}...</p></td></tr>\n        <tr><td style=\"padding-top:14px;\">\n          <table cellpadding=\"0\" cellspacing=\"0\" border=\"0\"><tr>\n            <td style=\"background-color:#0a1a16;border-radius:6px;padding:4px 10px;\"><span style=\"font-size:11px;color:#456e66;font-family:'DM Sans',Arial,sans-serif;\">✍️ ${featuredPaper.authors?.split(',').slice(0,2).join(', ')}${featuredPaper.authors?.split(',').length > 2 ? ' et al.' : ''}</span></td>\n            <td style=\"padding-left:14px;\"><a href=\"${featuredPaper.pdf}\" style=\"font-size:12px;color:#00c9a7;text-decoration:none;font-weight:700;font-family:'DM Sans',Arial,sans-serif;\">Read Paper →</a></td>\n          </tr></table>\n        </td></tr>\n      </table>\n    </td>\n  </tr>\n  <tr><td style=\"height:8px;background-color:#0d0d0d;\"></td></tr>\n  ` : ''}\n\n  <!-- PAPERS 2-5 -->\n  ${papersCompact}\n\n  <tr><td style=\"height:30px;background-color:#0d0d0d;\"></td></tr>\n\n  <!-- FOOTER -->\n  <tr>\n    <td class=\"footer-td\" style=\"background-color:#1e1e1e;border-radius:14px;padding:26px 36px;text-align:center;border:1px solid #ff6b35;\">\n      <p style=\"margin:0 0 6px 0;font-size:18px;\">⚡</p>\n      <p style=\"margin:0 0 6px 0;font-family:'Playfair Display',Georgia,serif;font-size:13px;color:#cccccc;font-style:italic;\">This email was auto-generated by your personal AI digest workflow.</p>\n      <p style=\"margin:0 0 16px 0;font-size:12px;color:#aaaaaa;font-family:'DM Sans',Arial,sans-serif;\">Please do not reply to this email.</p>\n      <div style=\"width:40px;height:1px;background-color:#ff6b35;margin:0 auto 16px auto;\"></div>\n      <p style=\"margin:0;font-size:10px;color:#888888;letter-spacing:1px;text-transform:uppercase;font-family:'DM Sans',Arial,sans-serif;\">Delivered daily &nbsp;·&nbsp; Created by Duwarahavidyan J. &nbsp;·&nbsp; All rights reserved © ${new Date().getFullYear()}</p>\n    </td>\n  </tr>\n\n  <tr><td style=\"height:30px;background-color:#0d0d0d;\"></td></tr>\n\n</table>\n</td></tr>\n</table>\n</div>\n</body>\n</html>`;\n\nreturn [{\n  json: {\n    subject: subject,\n    emailBody: emailBody\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1392,
+        -224
+      ],
+      "id": "9bac3739-3346-49f7-b4a7-8b73bb339908",
+      "name": "Email Body"
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.Email }}",
+        "subject": "={{ $('Email Body').item.json.subject }}",
+        "message": "={{ $('Email Body').item.json.emailBody }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        1840,
+        -224
+      ],
+      "id": "1bbd2d62-e04b-47ab-8957-2bbabaf5c79e",
+      "name": "Send a message",
+      "webhookId": "dca45e3e-e9ef-40fa-a38d-bdd1555d933f",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "09pDqngV5tsZkW7L",
+          "name": "Gmail account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "subscribe",
+        "options": {
+          "ignoreBots": false
+        }
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        144,
+        -640
+      ],
+      "id": "c76cfdd0-1ae0-4b35-969a-58142c1ca038",
+      "name": "Webhook",
+      "webhookId": "522b6f69-0bfa-4cd5-bcd6-458852b5cd3d"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://www.google.com/recaptcha/api/siteverify",
+        "sendBody": true,
+        "contentType": "form-urlencoded",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "secret",
+              "value": "6LdXZXIsAAAAAOAv9G1BYU7TJLK5NdxIkQmiHC3w"
+            },
+            {
+              "name": "response",
+              "value": "={{ $json.body['g-recaptcha-response'] }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        432,
+        -640
+      ],
+      "id": "09817af3-99ef-400f-a23b-459245581eea",
+      "name": "Verify reCAPTCHA"
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "value": "1f5gqu20KUK60ek8Oe_unuRvgxKdA7pRlzE_iC9pCt4s",
+          "mode": "list",
+          "cachedResultName": "n8n Daily AI News Clients",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1f5gqu20KUK60ek8Oe_unuRvgxKdA7pRlzE_iC9pCt4s/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Sheet1",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1f5gqu20KUK60ek8Oe_unuRvgxKdA7pRlzE_iC9pCt4s/edit#gid=0"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Name": "={{ $('Webhook').item.json.body.name }}",
+            "Email": "={{ $('Webhook').item.json.body.email }}"
+          },
+          "matchingColumns": [
+            "Email"
+          ],
+          "schema": [
+            {
+              "id": "Name",
+              "displayName": "Name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Email",
+              "displayName": "Email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1168,
+        -656
+      ],
+      "id": "6601a9e6-815f-48b8-ad5c-2d147267d8c5",
+      "name": "Store the User Info",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "iAy8ffPxlnrBY0b3",
+          "name": "Google Sheets account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "🟡 User Signup & Bot Protection\n- Users submit email via GitHub Pages\n- reCAPTCHA blocks bots\n- Emails stored in Google Sheets",
+        "height": 112,
+        "width": 352,
+        "color": 5
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -272,
+        -640
+      ],
+      "typeVersion": 1,
+      "id": "3075adea-ebba-401f-90e7-268158507c01",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "content": "🔵 Fetch Content\n- Fetch latest AI news from NewsAPI\n- Fetch latest ML/DL research papers from arXiv\n- Fetch recent papers from Semantic Scholar API\n- Combine all sources into a single stream",
+        "height": 128,
+        "width": 384
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        48,
+        -384
+      ],
+      "typeVersion": 1,
+      "id": "9cdf2a6a-41bc-46a3-a1e2-f12e133ee040",
+      "name": "Sticky Note1"
+    },
+    {
+      "parameters": {
+        "content": "🟣 AI Processing\n- Clean and normalize fetched data\n- Remove duplicates across sources\n- Summarize abstracts into 2 sentences using AI\n- Convert results into structured JSON format",
+        "height": 128,
+        "width": 384,
+        "color": 4
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        512,
+        -384
+      ],
+      "typeVersion": 1,
+      "id": "41954d9d-c3a4-4186-be5d-06ab50c1668b",
+      "name": "Sticky Note2"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "f2055563-2b81-4f32-99f7-b9500f28ee54",
+              "leftValue": "={{ $json.success }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        800,
+        -640
+      ],
+      "id": "ad072558-3b91-4b99-ac84-664ce0e89ff9",
+      "name": "Restrict Bots"
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "1f5gqu20KUK60ek8Oe_unuRvgxKdA7pRlzE_iC9pCt4s",
+          "mode": "list",
+          "cachedResultName": "n8n Daily AI News Clients",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1f5gqu20KUK60ek8Oe_unuRvgxKdA7pRlzE_iC9pCt4s/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Sheet1",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1f5gqu20KUK60ek8Oe_unuRvgxKdA7pRlzE_iC9pCt4s/edit#gid=0"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1632,
+        -224
+      ],
+      "id": "1609d598-b9e6-45ed-ab36-1f036dc5fc7d",
+      "name": "Get User Info",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "iAy8ffPxlnrBY0b3",
+          "name": "Google Sheets account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "🟢 Email Delivery\n- Merge news and research paper results\n- Build a nicely formatted email body\n- Read subscriber emails from Google Sheets\n- Send daily AI digest to all subscribers via Gmail",
+        "height": 128,
+        "width": 400,
+        "color": 6
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        1008,
+        -384
+      ],
+      "typeVersion": 1,
+      "id": "722e8129-4011-4d68-bc80-741f2a8e7b3c",
+      "name": "Sticky Note3"
+    },
+    {
+      "parameters": {
+        "url": "http://export.arxiv.org/api/query",
+        "sendQuery": true,
+        "specifyQuery": "json",
+        "jsonQuery": "{\n  \"search_query\": \"cat:cs.LG OR cat:cs.AI OR cat:cs.CV OR cat:cs.CL OR cat:stat.ML\",\n  \"sortBy\": \"submittedDate\",\n  \"sortOrder\": \"descending\",\n  \"max_results\": 5\n}",
+        "options": {
+          "batching": {
+            "batch": {
+              "batchSize": 1,
+              "batchInterval": 10000
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -128,
+        96
+      ],
+      "id": "32b7141b-c9bf-4765-b1c6-e31d5c1cfd45",
+      "name": "Fetch from arxiv"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Fetch AI News",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Fetch from arxiv",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Fetch from Semantic Scholar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Covert to Valid JSON": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Fetch from Semantic Scholar": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge": {
+      "main": [
+        [
+          {
+            "node": "JSON Output",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Structured Output Parser": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Summarize the Abstract": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent": {
+      "main": [
+        [
+          {
+            "node": "Merge Both Results",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Fetch AI News": {
+      "main": [
+        [
+          {
+            "node": "Merge Both Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "JSON Output": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Both Results": {
+      "main": [
+        [
+          {
+            "node": "Email Body",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Email Body": {
+      "main": [
+        [
+          {
+            "node": "Get User Info",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Verify reCAPTCHA",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verify reCAPTCHA": {
+      "main": [
+        [
+          {
+            "node": "Restrict Bots",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Store the User Info": {
+      "main": [
+        []
+      ]
+    },
+    "Restrict Bots": {
+      "main": [
+        [
+          {
+            "node": "Store the User Info",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get User Info": {
+      "main": [
+        [
+          {
+            "node": "Send a message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch from arxiv": {
+      "main": [
+        [
+          {
+            "node": "Covert to Valid JSON",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "32cd3068-7340-4145-91ec-2035354e4cd5",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "46c7ae781b181a31be01100c3c335d57c8e44d05799ca20b777e6cfbab70e2ab"
+  },
+  "id": "rRQoB3BVfqpqF9XJ",
+  "tags": []
+}
